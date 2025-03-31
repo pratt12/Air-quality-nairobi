@@ -1,145 +1,167 @@
-# Air-quality-nairobi
-
-Here’s a structured breakdown of the key concepts, along with the corresponding code snippets used in this **time series modeling exercise** for predicting PM2.5 air quality in Nairobi.
+# **ARMA Model for Air Quality Analysis in Dar es Salaam**  
+This code demonstrates **time series forecasting** of PM2.5 levels in Dar es Salaam using **AutoRegressive (AR) modeling** from `statsmodels`library. 
 
 ---
 
-## **1. Data Collection & Wrangling**
-### **MongoDB Querying**
-- Fetch data from MongoDB with filters (site 29, measurement "P2").
+## **1. Data Collection & Preprocessing**
+### **1.1 MongoDB Connection & Querying**
+- Connects to MongoDB and fetches PM2.5 (`P2`) data for **site 11** in Dar es Salaam.
 ```python
 client = MongoClient(host="localhost", port=27017)
 db = client["air-quality"]
-nairobi = db["nairobi"]
+dar = db["dar-es-salaam"]
 
-results = nairobi.find(
-    {"metadata.site": 29, "metadata.measurement": "P2"},
-    projection={"P2": 1, "timestamp": 1, "_id": 0},
-)
+# Check available sites and their readings count
+sites = dar.distinct("metadata.site")
+result = dar.aggregate([
+    {"$group": {"_id": "$metadata.site", "count": {"$count": {}}}}
+])
+readings_per_site = list(result)
 ```
 
-### **Time Zone Handling**
-- Convert timestamps from UTC to Nairobi time.
+### **1.2 Data Wrangling (`wrangle` function)**
+- Filters PM2.5 readings (`< 100` to remove outliers).
+- Resamples to **hourly frequency** and forward-fills missing values.
+- Converts timestamps to **Dar es Salaam timezone**.
 ```python
-df.index = df.index.tz_localize("UTC").tz_convert("Africa/Nairobi")
-```
+def wrangle(collection):
+    results = collection.find(
+        {"metadata.site": 11, "metadata.measurement": "P2"},
+        projection={"P2": 1, "timestamp": 1, "_id": 0},
+    )
+    df = pd.DataFrame(results).set_index("timestamp")
+    df.index = df.index.tz_localize("UTC").tz_convert("Africa/Dar_es_Salaam")
+    df = df[df["P2"] < 100]  # Remove outliers
+    df = df.resample("1H").mean().fillna(method='ffill')
+    return df["P2"]  # Return as a Series
 
-### **Outlier Removal**
-- Drop unrealistic PM2.5 values (> 500).
-```python
-df = df[df["P2"] <= 500]
-```
-
-### **Resampling & Forward-Filling**
-- Resample to hourly frequency and forward-fill missing values.
-```python
-df = df["P2"].resample("1H").mean().fillna(method="ffill").to_frame()
-```
-
-### **Feature Engineering (Lag Feature)**
-- Create a lagged feature (`P2.L1`) to capture autocorrelation.
-```python
-df["P2.L1"] = df["P2"].shift(1)
-df.dropna(inplace=True)  # Drop rows with NaN after shifting
+y = wrangle(dar)  # y = PM2.5 time series
 ```
 
 ---
 
 ## **2. Exploratory Data Analysis (EDA)**
-### **Box Plot (Distribution)**
+### **2.1 Time Series Plot**
+- Visualizes raw PM2.5 trends.
 ```python
 fig, ax = plt.subplots(figsize=(15, 6))
-df["P2"].plot(kind="box", vert=False, title="Distribution of PM2.5 Readings", ax=ax)
-plt.show()
+y.plot(xlabel="Time", ylabel="PM2.5", title="PM2.5 Time Series", ax=ax)
 ```
 
-### **Time Series Plot (Trend)**
+### **2.2 Rolling Average (7-Day Smoothing)**
+- Helps identify long-term trends.
 ```python
 fig, ax = plt.subplots(figsize=(15, 6))
-df["P2"].plot(xlabel="Time", ylabel="PM2.5", title="PM2.5 Time Series", ax=ax)
-plt.show()
+y.rolling(168).mean().plot(ax=ax, xlabel="Date", ylabel="PM2.5", title="7-Day Rolling Avg")
 ```
 
-### **Rolling Average (Weekly Trend)**
+### **2.3 Autocorrelation (ACF & PACF)**
+- **ACF** helps determine **MA (Moving Average) terms**.
+- **PACF** helps determine **AR (AutoRegressive) terms**.
 ```python
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+
 fig, ax = plt.subplots(figsize=(15, 6))
-df["P2"].rolling(168).mean().plot(ax=ax, ylabel="PM2.5", title="Weekly Rolling Average")
-plt.show()
+plot_acf(y, ax=ax, title="ACF for PM2.5")
+plot_pacf(y, ax=ax, title="PACF for PM2.5")
 ```
+**Observations:**
+- **ACF** shows slow decay → suggests **non-stationarity** (may need differencing).
+- **PACF** cuts off after lag `p` → suggests **AR(p)** model.
 
-### **Autocorrelation Analysis (Scatter Plot)**
-```python
-fig, ax = plt.subplots(figsize=(6, 6))
-ax.scatter(x=df["P2.L1"], y=df["P2"])
-plt.xlabel("P2.L1 (Previous Hour PM2.5)")
-plt.ylabel("P2 (Current Hour PM2.5)")
-plt.title("PM2.5 Autocorrelation")
-plt.show()
-```
+---
 
-### **Correlation Matrix**
+## **3. Train-Test Split (90-10)**
+- **90% training**, **10% testing** (sequential split for time series).
 ```python
-df.corr()  # Checks correlation between P2 and P2.L1
+cutoff_test = int(len(y) * 0.9)
+y_train = y[:cutoff_test]
+y_test = y[cutoff_test:]
 ```
 
 ---
 
-## **3. Train-Test Split (Time-Based)**
-- Split data into **80% train** and **20% test** (sequential split for time series).
+## **4. Baseline Model (Mean Prediction)**
+- Predicts the **mean PM2.5** of the training set.
 ```python
-X = df[["P2.L1"]]  # Features (lagged PM2.5)
-y = df["P2"]       # Target (current PM2.5)
-
-cutoff = int(len(X) * 0.8)  # 80-20 split
-
-X_train, y_train = X.iloc[:cutoff], y.iloc[:cutoff]
-X_test, y_test = X.iloc[cutoff:], y.iloc[cutoff:]
-```
-
----
-
-## **4. Baseline Model (Naive Forecast)**
-- Predict the **mean PM2.5** of the training set as a baseline.
-```python
-y_pred_baseline = [y_train.mean()] * len(y_train)
+y_train_mean = y_train.mean()
+y_pred_baseline = [y_train_mean] * len(y_train)
 mae_baseline = mean_absolute_error(y_train, y_pred_baseline)
-
-print("Mean P2 Reading:", round(y_train.mean(), 2))
-print("Baseline MAE:", round(mae_baseline, 2))
+print("Baseline MAE:", mae_baseline)
 ```
 
 ---
 
-## **5. Linear Regression Model**
-### **Training the Model**
+## **5. AutoRegressive (AR) Model Selection**
+### **5.1 Grid Search for Best Lag (`p`)**
+- Tests `p = 1 to 30` and selects the best based on **Mean Absolute Error (MAE)**.
 ```python
-model = LinearRegression()
-model.fit(X_train, y_train)
+from statsmodels.tsa.ar_model import AutoReg
+
+p_params = range(1, 31)
+maes = []
+
+for p in p_params:
+    model = AutoReg(y_train, lags=p).fit()
+    y_pred = model.predict().dropna()
+    mae = mean_absolute_error(y_train.iloc[p:], y_pred)
+    maes.append(mae)
+
+mae_series = pd.Series(maes, index=p_params, name="MAE")
+best_p = mae_series.idxmin()  # Best lag (p) with lowest MAE
 ```
 
-### **Evaluating the Model**
-- Compute **Mean Absolute Error (MAE)** for train and test sets.
+### **5.2 Train Best AR Model**
 ```python
-training_mae = mean_absolute_error(y_train, model.predict(X_train))
-test_mae = mean_absolute_error(y_test, model.predict(X_test))
+best_model = AutoReg(y_train, lags=best_p).fit()
+print(best_model.summary())
+```
 
-print("Training MAE:", round(training_mae, 2))
-print("Test MAE:", round(test_mae, 2))
+### **5.3 Check Residuals**
+- Residuals should be **white noise** (no autocorrelation).
+```python
+y_train_resid = best_model.resid
+y_train_resid.plot(title="Residuals Plot")
+plot_acf(y_train_resid, title="ACF of Residuals")
 ```
 
 ---
 
-## **Summary of Key Concepts**
-| **Concept**               | **Code Example** |
-|---------------------------|------------------|
-| **MongoDB Querying**      | `collection.find({filter}, projection)` |
-| **Time Zone Handling**    | `.tz_localize("UTC").tz_convert("Africa/Nairobi")` |
-| **Outlier Removal**       | `df[df["P2"] <= 500]` |
-| **Resampling & Filling**  | `.resample("1H").mean().fillna("ffill")` |
-| **Lag Feature Creation**  | `df["P2.L1"] = df["P2"].shift(1)` |
-| **Train-Test Split**      | `X.iloc[:cutoff], X.iloc[cutoff:]` |
-| **Baseline Model**        | `[y_train.mean()] * len(y_train)` |
-| **Linear Regression**     | `LinearRegression().fit(X_train, y_train)` |
-| **MAE Evaluation**        | `mean_absolute_error(y_true, y_pred)` |
+## **6. Walk-Forward Validation (WFV)**
+- Simulates **real-time forecasting** by updating the model with new data.
+```python
+y_pred_wfv = pd.Series()
+history = y_train.copy()
+
+for i in range(len(y_test)):
+    model = AutoReg(history, lags=best_p).fit()
+    next_pred = model.forecast()  # Predict next step
+    y_pred_wfv = y_pred_wfv.append(next_pred)
+    history = history.append(y_test[next_pred.index])  # Update history
+
+y_pred_wfv.name = "prediction"
+```
+
+### **6.1 Plot Predictions vs. Actual**
+```python
+df_pred_test = pd.DataFrame({"y_test": y_test, "y_pred_wfv": y_pred_wfv})
+fig = px.line(df_pred_test)
+fig.update_layout(
+    title="WFV Predictions vs Actual",
+    xaxis_title="Date",
+    yaxis_title="PM2.5",
+)
+```
 
 ---
+
+## **Key Takeaways**
+| **Step** | **Code** | **Purpose** |
+|----------|---------|------------|
+| **Data Collection** | `dar.find({filter})` | Fetch PM2.5 data from MongoDB |
+| **Preprocessing** | `.resample("1H").mean().fillna("ffill")` | Clean and resample data |
+| **EDA** | `plot_acf(y)`, `plot_pacf(y)` | Check autocorrelation |
+| **Train-Test Split** | `y[:cutoff]`, `y[cutoff:]` | 90-10 split |
+| **Baseline** | `[y_train.mean()] * len(y_train)` | Simple mean prediction |
+| **AR Model Selection** | `AutoReg(y_train, lags=p).fit()` | Find best lag (`p`) |
+| **Walk-Forward Validation** | `model.forecast()` | Simulate real-time predictions |
