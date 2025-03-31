@@ -1,1 +1,145 @@
 # Air-quality-nairobi
+
+Here’s a structured breakdown of the key concepts, along with the corresponding code snippets used in this **time series modeling exercise** for predicting PM2.5 air quality in Nairobi.
+
+---
+
+## **1. Data Collection & Wrangling**
+### **MongoDB Querying**
+- Fetch data from MongoDB with filters (site 29, measurement "P2").
+```python
+client = MongoClient(host="localhost", port=27017)
+db = client["air-quality"]
+nairobi = db["nairobi"]
+
+results = nairobi.find(
+    {"metadata.site": 29, "metadata.measurement": "P2"},
+    projection={"P2": 1, "timestamp": 1, "_id": 0},
+)
+```
+
+### **Time Zone Handling**
+- Convert timestamps from UTC to Nairobi time.
+```python
+df.index = df.index.tz_localize("UTC").tz_convert("Africa/Nairobi")
+```
+
+### **Outlier Removal**
+- Drop unrealistic PM2.5 values (> 500).
+```python
+df = df[df["P2"] <= 500]
+```
+
+### **Resampling & Forward-Filling**
+- Resample to hourly frequency and forward-fill missing values.
+```python
+df = df["P2"].resample("1H").mean().fillna(method="ffill").to_frame()
+```
+
+### **Feature Engineering (Lag Feature)**
+- Create a lagged feature (`P2.L1`) to capture autocorrelation.
+```python
+df["P2.L1"] = df["P2"].shift(1)
+df.dropna(inplace=True)  # Drop rows with NaN after shifting
+```
+
+---
+
+## **2. Exploratory Data Analysis (EDA)**
+### **Box Plot (Distribution)**
+```python
+fig, ax = plt.subplots(figsize=(15, 6))
+df["P2"].plot(kind="box", vert=False, title="Distribution of PM2.5 Readings", ax=ax)
+plt.show()
+```
+
+### **Time Series Plot (Trend)**
+```python
+fig, ax = plt.subplots(figsize=(15, 6))
+df["P2"].plot(xlabel="Time", ylabel="PM2.5", title="PM2.5 Time Series", ax=ax)
+plt.show()
+```
+
+### **Rolling Average (Weekly Trend)**
+```python
+fig, ax = plt.subplots(figsize=(15, 6))
+df["P2"].rolling(168).mean().plot(ax=ax, ylabel="PM2.5", title="Weekly Rolling Average")
+plt.show()
+```
+
+### **Autocorrelation Analysis (Scatter Plot)**
+```python
+fig, ax = plt.subplots(figsize=(6, 6))
+ax.scatter(x=df["P2.L1"], y=df["P2"])
+plt.xlabel("P2.L1 (Previous Hour PM2.5)")
+plt.ylabel("P2 (Current Hour PM2.5)")
+plt.title("PM2.5 Autocorrelation")
+plt.show()
+```
+
+### **Correlation Matrix**
+```python
+df.corr()  # Checks correlation between P2 and P2.L1
+```
+
+---
+
+## **3. Train-Test Split (Time-Based)**
+- Split data into **80% train** and **20% test** (sequential split for time series).
+```python
+X = df[["P2.L1"]]  # Features (lagged PM2.5)
+y = df["P2"]       # Target (current PM2.5)
+
+cutoff = int(len(X) * 0.8)  # 80-20 split
+
+X_train, y_train = X.iloc[:cutoff], y.iloc[:cutoff]
+X_test, y_test = X.iloc[cutoff:], y.iloc[cutoff:]
+```
+
+---
+
+## **4. Baseline Model (Naive Forecast)**
+- Predict the **mean PM2.5** of the training set as a baseline.
+```python
+y_pred_baseline = [y_train.mean()] * len(y_train)
+mae_baseline = mean_absolute_error(y_train, y_pred_baseline)
+
+print("Mean P2 Reading:", round(y_train.mean(), 2))
+print("Baseline MAE:", round(mae_baseline, 2))
+```
+
+---
+
+## **5. Linear Regression Model**
+### **Training the Model**
+```python
+model = LinearRegression()
+model.fit(X_train, y_train)
+```
+
+### **Evaluating the Model**
+- Compute **Mean Absolute Error (MAE)** for train and test sets.
+```python
+training_mae = mean_absolute_error(y_train, model.predict(X_train))
+test_mae = mean_absolute_error(y_test, model.predict(X_test))
+
+print("Training MAE:", round(training_mae, 2))
+print("Test MAE:", round(test_mae, 2))
+```
+
+---
+
+## **Summary of Key Concepts**
+| **Concept**               | **Code Example** |
+|---------------------------|------------------|
+| **MongoDB Querying**      | `collection.find({filter}, projection)` |
+| **Time Zone Handling**    | `.tz_localize("UTC").tz_convert("Africa/Nairobi")` |
+| **Outlier Removal**       | `df[df["P2"] <= 500]` |
+| **Resampling & Filling**  | `.resample("1H").mean().fillna("ffill")` |
+| **Lag Feature Creation**  | `df["P2.L1"] = df["P2"].shift(1)` |
+| **Train-Test Split**      | `X.iloc[:cutoff], X.iloc[cutoff:]` |
+| **Baseline Model**        | `[y_train.mean()] * len(y_train)` |
+| **Linear Regression**     | `LinearRegression().fit(X_train, y_train)` |
+| **MAE Evaluation**        | `mean_absolute_error(y_true, y_pred)` |
+
+---
