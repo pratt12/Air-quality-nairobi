@@ -47,6 +47,7 @@ y = wrangle(dar)  # y = PM2.5 time series
 fig, ax = plt.subplots(figsize=(15, 6))
 y.plot(xlabel="Time", ylabel="PM2.5", title="PM2.5 Time Series", ax=ax)
 ```
+<img width="697" alt="image" src="https://github.com/user-attachments/assets/bc86f84f-6c11-4672-a7f0-b5749aa0b6e8" />
 
 ### **2.2 Rolling Average (7-Day Smoothing)**
 - Helps identify long-term trends.
@@ -54,6 +55,8 @@ y.plot(xlabel="Time", ylabel="PM2.5", title="PM2.5 Time Series", ax=ax)
 fig, ax = plt.subplots(figsize=(15, 6))
 y.rolling(168).mean().plot(ax=ax, xlabel="Date", ylabel="PM2.5", title="7-Day Rolling Avg")
 ```
+<img width="678" alt="image" src="https://github.com/user-attachments/assets/999c6a7b-b69f-4222-b401-a5934fe88038" />
+
 
 ### **2.3 Autocorrelation (ACF & PACF)**
 - **ACF** helps determine **MA (Moving Average) terms**.
@@ -68,6 +71,9 @@ plot_pacf(y, ax=ax, title="PACF for PM2.5")
 **Observations:**
 - **ACF** shows slow decay → suggests **non-stationarity** (may need differencing).
 - **PACF** cuts off after lag `p` → suggests **AR(p)** model.
+
+<img width="676" alt="image" src="https://github.com/user-attachments/assets/68ffd608-562b-49f0-911e-edcac652ebb6" />
+<img width="688" alt="image" src="https://github.com/user-attachments/assets/afb4dd37-c550-4987-ba4d-248734a81e85" />
 
 ---
 
@@ -151,17 +157,8 @@ fig.update_layout(
     xaxis_title="Date",
     yaxis_title="PM2.5",
 )
+
+<img width="683" alt="image" src="https://github.com/user-attachments/assets/b6ee336c-0093-4689-92f1-73ad9e5357c3" />
+
 ```
 
----
-
-## **Key Takeaways**
-| **Step** | **Code** | **Purpose** |
-|----------|---------|------------|
-| **Data Collection** | `dar.find({filter})` | Fetch PM2.5 data from MongoDB |
-| **Preprocessing** | `.resample("1H").mean().fillna("ffill")` | Clean and resample data |
-| **EDA** | `plot_acf(y)`, `plot_pacf(y)` | Check autocorrelation |
-| **Train-Test Split** | `y[:cutoff]`, `y[cutoff:]` | 90-10 split |
-| **Baseline** | `[y_train.mean()] * len(y_train)` | Simple mean prediction |
-| **AR Model Selection** | `AutoReg(y_train, lags=p).fit()` | Find best lag (`p`) |
-| **Walk-Forward Validation** | `model.forecast()` | Simulate real-time predictions |
