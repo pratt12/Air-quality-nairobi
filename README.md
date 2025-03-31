@@ -157,8 +157,6 @@ fig.update_layout(
     xaxis_title="Date",
     yaxis_title="PM2.5",
 )
-
-<img width="683" alt="image" src="https://github.com/user-attachments/assets/b6ee336c-0093-4689-92f1-73ad9e5357c3" />
-
 ```
+<img width="683" alt="image" src="https://github.com/user-attachments/assets/b6ee336c-0093-4689-92f1-73ad9e5357c3" />
 
